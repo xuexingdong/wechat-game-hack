@@ -5,11 +5,12 @@ from abc import ABC, abstractmethod
 
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 
 ASSETS_PATH = os.path.dirname(os.path.realpath(__file__)) + '/assets/'
 
 threshold_chess_max = [130, 100, 100]
+threshold_background_max = [221, 229, 255]
+threshold_background_min = [204, 196, 200]
 
 
 class WechatJump(ABC):
@@ -17,9 +18,6 @@ class WechatJump(ABC):
     scale = 2
     # 系数，距离 * 系数 = 按压时间
     ratio = 0.0023
-
-    threshold_background_max = [221, 229, 255]
-    threshold_background_min = [204, 196, 255]
 
     threshold_shadow_max = [150, 150, 180]
     threshold_shadow_min = [140, 140, 170]
@@ -78,14 +76,19 @@ class WechatJump(ABC):
         pic = cv2.imread('screenshot.png', cv2.IMREAD_COLOR)
         h, w, _ = pic.shape
         # 取中间1/3区域进行计算
-        sub_pic = pic[math.floor(h / 3):math.floor(h * 2 / 3), :]
-        cv2.imwrite(str(time.time()) + '.png', sub_pic)
-        cv2.imwrite('screenshot.png', sub_pic)
+        pic = pic[math.floor(h / 3):math.floor(h * 2 / 3), :]
+        for row_idx, row in enumerate(pic):
+            for col_idx, col in enumerate(row):
+                # 过滤背景
+                if threshold_background_min[0] <= col[0] <= threshold_background_max[0] \
+                        and threshold_background_min[1] <= col[1] <= threshold_background_max[1] \
+                        and threshold_background_min[2] <= col[2] <= threshold_background_max[2]:
+                    pic[row_idx, col_idx] = np.array([0, 0, 0])
         # 根据灰度数组找出棋子位置
-        chess_x, chess_y = self.__find_chess(sub_pic)
+        chess_x, chess_y = self.__find_chess(pic)
         print('棋子位置', chess_x, chess_y)
         # 根据灰度数组找出下一个盒子的位置
-        box_x, box_y = self.__find_next_box(sub_pic)
+        box_x, box_y = self.__find_next_box(pic)
         print('盒子位置', box_x, box_y)
         dis = abs(box_x - chess_x)
         return dis
@@ -162,8 +165,7 @@ class WechatJump(ABC):
         for m, n in matches:
             if m.distance < 0.75 * n.distance:
                 goods.append(m)
-        print(len(goods))
-        if len(goods) < 10:
+        if len(goods) <= 10:
             return None
         src_pts = np.reshape(np.float32([kp1[m.queryIdx].pt for m in goods]), (-1, 1, 2))
         dst_pts = np.reshape(np.float32([kp2[m.trainIdx].pt for m in goods]), (-1, 1, 2))
@@ -183,41 +185,3 @@ def show(result):
     cv2.imshow('result', result)
     cv2.waitKey()
     cv2.destroyAllWindows()
-
-
-if __name__ == '__main__':
-    print(WechatJump.find_area('./assets/restart.png', 'screenshot2.png'))
-    # src = cv2.imread('1514737770.73798.png', cv2.IMREAD_COLOR)
-    # gray_arr = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
-    # gray_arr[np.logical_or(gray_arr < 50, gray_arr > 100)] = 255
-    # gray_arr = cv2.medianBlur(gray_arr, 5)
-    # _, binary = cv2.threshold(gray_arr, 80, 255, cv2.THRESH_BINARY)
-    # show(binary)
-    # index_arr = np.where(binary == 0)
-    # # 找到最左侧的点
-    # left = index_arr[1].min()
-    # # 找到最右侧的点
-    # right = index_arr[1].max()
-    # # 找到最下方的点
-    # bottom = index_arr[0].max()
-    # x = (left + right) / 2
-    # # 圆底半径
-    # r = (right - left) / 2
-    # y = bottom - r
-    # print(left, right, bottom)
-    # print(x, y)
-    #
-    # 找到背景色的灰度，进行去除
-    # bg_gray = np.bincount(gray_arr.reshape(-1)).argmax()
-    # bg_gray = 206
-    # # 把背景色中灰度数值出现最多的一个灰度当做背景灰度，相差10范围内的灰度像素都进行去除
-    # bool_index = np.logical_and(gray_arr >= bg_gray - 5, gray_arr <= bg_gray + 5)
-    # gray_arr[bool_index] = 0
-    # gray_arr = cv2.medianBlur(gray_arr, 5)
-    # show(gray_arr)
-    # index_arr = np.where(gray_arr != 0)
-    # top_y = index_arr[0].min()
-    # top_x = np.where(gray_arr[top_y] != 0)[0][0]
-    # right_x = index_arr[1].max()
-    # right_y = np.where(gray_arr[:, right_x] != 0)[0][0]
-    # print(top_x, top_y, right_x, right_y)
