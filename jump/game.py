@@ -12,6 +12,8 @@ ASSETS_PATH = os.path.dirname(os.path.realpath(__file__)) + '/assets/'
 class WechatJump(ABC):
     # 屏幕截图像素与屏幕尺寸的比例，本比例为iPhone 6s
     scale = 2
+    # 系数，距离 * 系数 = 按压时间
+    ratio = 1
 
     def go(self):
         print('成功加载微信')
@@ -19,9 +21,11 @@ class WechatJump(ABC):
         print('下拉寻找跳一跳入口')
         self.swipe(w / 2, 100, w / 2, h / 2, 0.5)
         print('开始游戏')
-        self.start()
+        self.__click(ASSETS_PATH + 'logo.png')
+        time.sleep(2)
+        self.__click(ASSETS_PATH + 'start.png')
         time.sleep(1)
-        self.jump()
+        self._jump()
 
     @abstractmethod
     def window_size(self):
@@ -43,27 +47,26 @@ class WechatJump(ABC):
     def tap(self, x, y):
         pass
 
-    def start(self):
-        self.__click(ASSETS_PATH + 'logo.png')
-        time.sleep(2)
-        self.__click(ASSETS_PATH + 'start.png')
-
-    def is_gameover(self):
-        return self.__find(ASSETS_PATH + 'restart.png') is not None
-
-    def restart(self):
-        self.__click(ASSETS_PATH + 'restart.png')
-
-    def jump(self):
-        while not self.is_gameover():
+    def _jump(self):
+        # 判断游戏是否结束
+        while self.__find(ASSETS_PATH + 'restart.png') is None:
+            # 计算距离，设置
+            dis = self._cal_dis()
             print('点击跳跃')
-            self.swipe(100, 100, 100, 100, 2)
+            self.swipe(100, 100, 100, 100, self.ratio * dis)
             time.sleep(2)
         else:
             print('重新开始')
-            self.restart()
+            self.__click(ASSETS_PATH + 'restart.png')
             time.sleep(1)
-            self.jump()
+            self._jump()
+
+    def _cal_dis(self):
+        self.__screenshot()
+        return 1
+
+    def __screenshot(self):
+        self.screenshot('screenshot.png')
 
     def __click(self, img):
         area: np.ndarray = self.__find(img)
@@ -71,7 +74,7 @@ class WechatJump(ABC):
         self.tap(summary[0] / 4 / self.scale, summary[1] / 4 / self.scale)
 
     def __find(self, img):
-        self.screenshot('screenshot.png')
+        self.__screenshot()
         return WechatJump.find_area(img, 'screenshot.png')
 
     @staticmethod
