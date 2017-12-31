@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 import cv2
 import os
 
+import math
+
 import numpy as np
 
 ASSETS_PATH = os.path.dirname(os.path.realpath(__file__)) + '/assets/'
@@ -14,6 +16,14 @@ class WechatJump(ABC):
     scale = 2
     # 系数，距离 * 系数 = 按压时间
     ratio = 1
+
+    threshold_person_max = [130, 100, 100]
+
+    threshold_background_max = [221, 229, 255]
+    threshold_background_min = [204, 196, 255]
+
+    threshold_shadow_max = [150, 150, 180]
+    threshold_shadow_min = [140, 140, 170]
 
     def go(self):
         print('成功加载微信')
@@ -51,10 +61,10 @@ class WechatJump(ABC):
         # 判断游戏是否结束
         while self.__find(ASSETS_PATH + 'restart.png') is None:
             # 计算距离，设置
-            dis = self._cal_dis()
+            self._cal_dis()
             print('点击跳跃')
-            self.swipe(100, 100, 100, 100, self.ratio * dis)
-            time.sleep(2)
+            # self.swipe(100, 100, 100, 100, 2)
+            # time.sleep(2)
         else:
             print('重新开始')
             self.__click(ASSETS_PATH + 'restart.png')
@@ -63,7 +73,37 @@ class WechatJump(ABC):
 
     def _cal_dis(self):
         self.__screenshot()
-        return 1
+        pic = cv2.imread('screenshot.png', cv2.IMREAD_COLOR)
+        h, w, _ = pic.shape
+        # 取中间1/3区域进行计算
+        sub_pic = pic[math.floor(h / 3):math.floor(h * 2 / 3), :]
+        self.area = None
+        chess_x, chess_y = self.__find_chess(sub_pic)
+        box_x, box_y = self.__find_next_box(sub_pic)
+        dis = math.sqrt(((box_x - chess_x) ** 2) + ((box_y - box_x) ** 2))
+        # 长按
+        self.swipe(100, 100, 100, 100, dis * self.ratio)
+        # 等待跳跃动画
+        time.sleep(2)
+
+    def __find_chess(self, nparray):
+        gray_arr = cv2.cvtColor(nparray, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(gray_arr, 100, 255, cv2.THRESH_BINARY)
+        index_arr = np.where(binary == 0)
+        # 找到最左侧的点
+        left = np.where(binary == index_arr[1].min())
+        # 找到最右侧的点
+        right = np.where(binary == index_arr[1].max())
+        # 找到最下方的点
+        down = np.where(binary == index_arr[0].max())
+        x = (left + right) / 2
+        # 圆底半径
+        r = (right - left) / 2
+        y = down - r
+        return x, y
+
+    def __find_next_box(self, nparray):
+        # TODO
 
     def __screenshot(self):
         self.screenshot('screenshot.png')
@@ -117,6 +157,15 @@ class WechatJump(ABC):
         return dst
 
 
+def show(result):
+    cv2.namedWindow("result", 0)
+    cv2.resizeWindow("result", 800, 480)
+    cv2.imshow('result', result)
+    cv2.waitKey()
+    cv2.destroyAllWindows()
+
+
 if __name__ == '__main__':
-    jump = WechatJump()
-    jump.go()
+    src = cv2.imread('./2.png', cv2.IMREAD_COLOR)
+    gray_arr = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray_arr, 100, 255, cv2.THRESH_BINARY)
