@@ -4,7 +4,6 @@ from jump.game import WechatJump
 
 
 class IOSJump(WechatJump):
-
     scale = 2
 
     def __init__(self):

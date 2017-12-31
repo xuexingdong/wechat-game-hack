@@ -1,23 +1,22 @@
+import math
+import os
 import time
 from abc import ABC, abstractmethod
 
 import cv2
-import os
-
-import math
-
 import numpy as np
+import matplotlib.pyplot as plt
 
 ASSETS_PATH = os.path.dirname(os.path.realpath(__file__)) + '/assets/'
+
+threshold_chess_max = [130, 100, 100]
 
 
 class WechatJump(ABC):
     # 屏幕截图像素与屏幕尺寸的比例，本比例为iPhone 6s
     scale = 2
     # 系数，距离 * 系数 = 按压时间
-    ratio = 1
-
-    threshold_person_max = [130, 100, 100]
+    ratio = 0.0023
 
     threshold_background_max = [221, 229, 255]
     threshold_background_min = [204, 196, 255]
@@ -29,10 +28,11 @@ class WechatJump(ABC):
         print('成功加载微信')
         w, h = self.window_size()
         print('下拉寻找跳一跳入口')
-        self.swipe(w / 2, 100, w / 2, h / 2, 0.5)
-        print('开始游戏')
+        self.swipe(w / 2, 200, w / 2, 2 * h / 3, 0.5)
+        print('点击logo')
         self.__click(ASSETS_PATH + 'logo.png')
         time.sleep(2)
+        print('点击开始游戏')
         self.__click(ASSETS_PATH + 'start.png')
         time.sleep(1)
         self._jump()
@@ -61,12 +61,14 @@ class WechatJump(ABC):
         # 判断游戏是否结束
         while self.__find(ASSETS_PATH + 'restart.png') is None:
             # 计算距离，设置
-            self._cal_dis()
-            print('点击跳跃')
-            # self.swipe(100, 100, 100, 100, 2)
-            # time.sleep(2)
+            dis = self._cal_dis()
+            print('距离 %s 按压时间 %s' % (dis, dis * self.ratio))
+            # 长按
+            self.swipe(100, 100, 100, 100, dis * self.ratio)
+            time.sleep(1)
         else:
             print('重新开始')
+            self.__screenshot()
             self.__click(ASSETS_PATH + 'restart.png')
             time.sleep(1)
             self._jump()
@@ -77,33 +79,50 @@ class WechatJump(ABC):
         h, w, _ = pic.shape
         # 取中间1/3区域进行计算
         sub_pic = pic[math.floor(h / 3):math.floor(h * 2 / 3), :]
-        self.area = None
+        cv2.imwrite(str(time.time()) + '.png', sub_pic)
+        cv2.imwrite('screenshot.png', sub_pic)
+        # 根据灰度数组找出棋子位置
         chess_x, chess_y = self.__find_chess(sub_pic)
+        print('棋子位置', chess_x, chess_y)
+        # 根据灰度数组找出下一个盒子的位置
         box_x, box_y = self.__find_next_box(sub_pic)
-        dis = math.sqrt(((box_x - chess_x) ** 2) + ((box_y - box_x) ** 2))
-        # 长按
-        self.swipe(100, 100, 100, 100, dis * self.ratio)
-        # 等待跳跃动画
-        time.sleep(2)
+        print('盒子位置', box_x, box_y)
+        dis = abs(box_x - chess_x)
+        return dis
 
-    def __find_chess(self, nparray):
-        gray_arr = cv2.cvtColor(nparray, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray_arr, 100, 255, cv2.THRESH_BINARY)
+    def __find_chess(self, sub_pic):
+        gray_arr = cv2.cvtColor(sub_pic, cv2.COLOR_BGR2GRAY)
+        gray_arr[np.logical_or(gray_arr < 50, gray_arr > 100)] = 255
+        # 中值滤波去噪
+        gray_arr = cv2.medianBlur(gray_arr, 5)
+        _, binary = cv2.threshold(gray_arr, 80, 255, cv2.THRESH_BINARY)
         index_arr = np.where(binary == 0)
         # 找到最左侧的点
-        left = np.where(binary == index_arr[1].min())
+        left = index_arr[1].min()
         # 找到最右侧的点
-        right = np.where(binary == index_arr[1].max())
+        right = index_arr[1].max()
         # 找到最下方的点
-        down = np.where(binary == index_arr[0].max())
+        bottom = index_arr[0].max()
         x = (left + right) / 2
         # 圆底半径
         r = (right - left) / 2
-        y = down - r
+        y = bottom - r
         return x, y
 
-    def __find_next_box(self, nparray):
-        # TODO
+    def __find_next_box(self, sub_pic):
+        gray_arr = cv2.cvtColor(sub_pic, cv2.COLOR_BGR2GRAY)
+        # 找到出现次数最多的灰度值
+        bg_gray = 206
+        # 把该值当做背景色进行去除
+        bool_index = np.logical_and(gray_arr >= bg_gray - 5, gray_arr <= bg_gray + 5)
+        gray_arr[bool_index] = 0
+        gray_arr = cv2.medianBlur(gray_arr, 5)
+        index_arr = np.where(gray_arr != 0)
+        top_y = index_arr[0].min()
+        top_x = np.where(gray_arr[top_y] != 0)[0][0]
+        right_x = index_arr[1].max()
+        right_y = np.where(gray_arr[:, right_x] != 0)[0][0]
+        return top_x, right_y
 
     def __screenshot(self):
         self.screenshot('screenshot.png')
@@ -133,7 +152,7 @@ class WechatJump(ABC):
         # 蛮力匹配算法,有两个参数，距离度量(L2(default),L1)，是否交叉匹配(默认false)
         bf = cv2.BFMatcher()
         # 返回k个最佳匹配
-        matches = bf.knnMatch(des1, des2, k=2)
+        matches = bf.knnMatch(des1, des2, 2)
         # cv2.drawMatchesKnn expects list of lists as matches.
         # opencv3.0有drawMatchesKnn函数
         # Apply ratio test
@@ -143,6 +162,7 @@ class WechatJump(ABC):
         for m, n in matches:
             if m.distance < 0.75 * n.distance:
                 goods.append(m)
+        print(len(goods))
         if len(goods) < 10:
             return None
         src_pts = np.reshape(np.float32([kp1[m.queryIdx].pt for m in goods]), (-1, 1, 2))
@@ -166,6 +186,38 @@ def show(result):
 
 
 if __name__ == '__main__':
-    src = cv2.imread('./2.png', cv2.IMREAD_COLOR)
-    gray_arr = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray_arr, 100, 255, cv2.THRESH_BINARY)
+    print(WechatJump.find_area('./assets/restart.png', 'screenshot2.png'))
+    # src = cv2.imread('1514737770.73798.png', cv2.IMREAD_COLOR)
+    # gray_arr = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+    # gray_arr[np.logical_or(gray_arr < 50, gray_arr > 100)] = 255
+    # gray_arr = cv2.medianBlur(gray_arr, 5)
+    # _, binary = cv2.threshold(gray_arr, 80, 255, cv2.THRESH_BINARY)
+    # show(binary)
+    # index_arr = np.where(binary == 0)
+    # # 找到最左侧的点
+    # left = index_arr[1].min()
+    # # 找到最右侧的点
+    # right = index_arr[1].max()
+    # # 找到最下方的点
+    # bottom = index_arr[0].max()
+    # x = (left + right) / 2
+    # # 圆底半径
+    # r = (right - left) / 2
+    # y = bottom - r
+    # print(left, right, bottom)
+    # print(x, y)
+    #
+    # 找到背景色的灰度，进行去除
+    # bg_gray = np.bincount(gray_arr.reshape(-1)).argmax()
+    # bg_gray = 206
+    # # 把背景色中灰度数值出现最多的一个灰度当做背景灰度，相差10范围内的灰度像素都进行去除
+    # bool_index = np.logical_and(gray_arr >= bg_gray - 5, gray_arr <= bg_gray + 5)
+    # gray_arr[bool_index] = 0
+    # gray_arr = cv2.medianBlur(gray_arr, 5)
+    # show(gray_arr)
+    # index_arr = np.where(gray_arr != 0)
+    # top_y = index_arr[0].min()
+    # top_x = np.where(gray_arr[top_y] != 0)[0][0]
+    # right_x = index_arr[1].max()
+    # right_y = np.where(gray_arr[:, right_x] != 0)[0][0]
+    # print(top_x, top_y, right_x, right_y)
