@@ -1,43 +1,63 @@
-import cv2
-import numpy as np
 import time
-import wda
+from abc import ABC, abstractmethod
 
-ASSETS_PATH = './assets/'
-# 屏幕截图像素与屏幕尺寸的比例，本比例为iPhone 6s
-SCALE = 2
+import cv2
+import os
+
+import numpy as np
+
+ASSETS_PATH = os.path.dirname(os.path.realpath(__file__)) + '/assets/'
 
 
-class WechatJump:
-    def __init__(self):
-        self.c = wda.Client('http://192.168.1.3:8100')
-        self.s = self.c.session('com.tencent.xin')
-        print('成功加载微信')
-        screen_w, screen_h = self.s.window_size()
-        print('下拉寻找跳一跳入口')
-        self.s.swipe(screen_w / 2, 100, screen_w / 2, screen_h / 2, 0.2)
-        print('点击图标')
-        self.__click(ASSETS_PATH + 'logo.png')
-        time.sleep(2)
+class WechatJump(ABC):
+    # 屏幕截图像素与屏幕尺寸的比例，本比例为iPhone 6s
+    scale = 2
 
     def go(self):
+        print('成功加载微信')
+        w, h = self.window_size()
+        print('下拉寻找跳一跳入口')
+        self.swipe(w / 2, 100, w / 2, h / 2, 0.5)
         print('开始游戏')
         self.start()
         time.sleep(1)
         self.jump()
 
+    @abstractmethod
+    def window_size(self):
+        """
+        获取窗口大小
+        :return: (width, height)
+        """
+        return 0, 0
+
+    @abstractmethod
+    def screenshot(self, path):
+        pass
+
+    @abstractmethod
+    def swipe(self, x1, y1, x2, y2, duration):
+        pass
+
+    @abstractmethod
+    def tap(self, x, y):
+        pass
+
     def start(self):
+        self.__click(ASSETS_PATH + 'logo.png')
+        time.sleep(2)
         self.__click(ASSETS_PATH + 'start.png')
 
     def is_gameover(self):
-        return self.find(ASSETS_PATH + 'restart.png') is not None
+        return self.__find(ASSETS_PATH + 'restart.png') is not None
 
     def restart(self):
         self.__click(ASSETS_PATH + 'restart.png')
 
     def jump(self):
         while not self.is_gameover():
-            self.s.swipe(100, 100, 100, 100, 2)
+            print('点击跳跃')
+            self.swipe(100, 100, 100, 100, 2)
             time.sleep(2)
         else:
             print('重新开始')
@@ -46,23 +66,13 @@ class WechatJump:
             self.jump()
 
     def __click(self, img):
-        area: np.ndarray = self.find(img)
+        area: np.ndarray = self.__find(img)
         summary = area.sum(axis=0).sum(axis=0)
-        print('点击', summary[0] / 4, summary[1] / 4)
-        self.s.tap(summary[0] / 4 / SCALE, summary[1] / 4 / SCALE)
+        self.tap(summary[0] / 4 / self.scale, summary[1] / 4 / self.scale)
 
-    def _find_chess(self):
-        self.__screenshot()
-        area: np.ndarray = self.find(ASSETS_PATH + 'chess.png')
-        print(area)
-        summary = area.sum(axis=0).sum(axis=0)
-
-    def __screenshot(self):
-        self.c.screenshot(ASSETS_PATH + 'screenshot.png')
-
-    def find(self, img):
-        self.__screenshot()
-        return WechatJump.find_area(img, ASSETS_PATH + 'screenshot.png')
+    def __find(self, img):
+        self.screenshot('screenshot.png')
+        return WechatJump.find_area(img, 'screenshot.png')
 
     @staticmethod
     def find_area(one, another):
