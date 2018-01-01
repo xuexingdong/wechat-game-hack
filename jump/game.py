@@ -10,7 +10,7 @@ ASSETS_PATH = os.path.dirname(os.path.realpath(__file__)) + '/assets/'
 
 # B, G, R
 threshold_chess_max = [130, 100, 100]
-threshold_background_max = [221, 229, 255]
+threshold_background_max = [221, 255, 255]
 threshold_background_min = [145, 196, 196]
 
 # 识别棋子底部的最大宽度
@@ -22,6 +22,8 @@ class WechatJump(ABC):
     scale = 2
     # 系数，距离 * 系数 = 按压时间，本系数为iPhone 6s
     ratio = 0.0023
+
+    pic = None
 
     def go(self):
         print('成功加载微信')
@@ -87,17 +89,17 @@ class WechatJump(ABC):
                         and threshold_background_min[2] <= col[2] <= threshold_background_max[2]:
                     pic[row_idx, col_idx] = np.array([0, 0, 0])
         cv2.imwrite(str(time.time()) + '.png', pic)
+        self.pic = pic
         # 根据灰度数组找出棋子位置
-        chess_x = self.__find_chess(pic)
+        chess_x = self.__find_and_remove_chess()
         print('棋子位置', chess_x)
         # 根据灰度数组找出下一个盒子的位置
-        box_x = self.__find_next_box(pic)
+        box_x = self.__find_next_box()
         print('盒子位置', box_x)
         return chess_x, box_x
 
-    @staticmethod
-    def __find_chess(pic):
-        gray_arr = cv2.cvtColor(pic, cv2.COLOR_BGR2GRAY)
+    def __find_and_remove_chess(self):
+        gray_arr = cv2.cvtColor(self.pic, cv2.COLOR_BGR2GRAY)
         gray_arr[np.logical_or(gray_arr < 40, gray_arr > 100)] = 255
         # 中值滤波去噪
         gray_arr = cv2.medianBlur(gray_arr, 5)
@@ -107,27 +109,21 @@ class WechatJump(ABC):
         _, contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         # 过滤异常大小的轮廓
         contours = list(filter(lambda c: 500 < cv2.contourArea(c) < 10000, contours))
-        left = binary.shape[1]
-        right = 0
         for contour in contours:
-            # cv2.drawContours(src, [contour], -1, (0, 0, 255), 3)
-            # show(src)
-            min_x = contour.min(axis=1).min(axis=0)[0]
-            max_x = contour.max(axis=1).max(axis=0)[0]
-            print(max_x - min_x)
-            if max_x - min_x < threshold_chess_width_max:
-                left = min(left, min_x)
-                right = max(right, max_x)
-        return (left + right) / 2
+            left = contour.min(axis=1).min(axis=0)[0]
+            right = contour.max(axis=1).max(axis=0)[0]
+            if right - left < threshold_chess_width_max:
+                self.pic[:, left:right] = np.array([0, 0, 0])
+                return (left + right) / 2
+        return 0
 
-    @staticmethod
-    def __find_next_box(pic):
-        gray_arr = cv2.cvtColor(pic, cv2.COLOR_BGR2GRAY)
-        gray_arr = cv2.medianBlur(gray_arr, 5)
-        bg_gray = np.bincount(pic.reshape(-1)).argmax()
+    def __find_next_box(self):
+        gray_arr = cv2.cvtColor(self.pic, cv2.COLOR_BGR2GRAY)
+        bg_gray = np.bincount(self.pic.reshape(-1)).argmax()
         # 把背景色中灰度数值出现最多的一个灰度当做背景灰度，相差3范围内的灰度像素都进行去除
         bool_index = np.logical_and(gray_arr >= bg_gray - 3, gray_arr <= bg_gray - 3)
         gray_arr[bool_index] = 0
+        gray_arr = cv2.medianBlur(gray_arr, 5)
         index_arr = np.where(gray_arr != 0)
         top_y = index_arr[0].min()
         top_line = np.where(gray_arr[top_y] != 0)
@@ -195,15 +191,16 @@ def show(result):
 
 
 if __name__ == '__main__':
-    src = cv2.imread('1514776195.942049.png', cv2.IMREAD_COLOR)
-    for row_idx, row in enumerate(src):
-        for col_idx, col in enumerate(row):
-            # 过滤背景
-            if threshold_background_min[0] <= col[0] <= threshold_background_max[0] \
-                    and threshold_background_min[1] <= col[1] <= threshold_background_max[1] \
-                    and threshold_background_min[2] <= col[2] <= threshold_background_max[2]:
-                src[row_idx, col_idx] = np.array([0, 0, 0])
-    gray_arr = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+    pass
+    # src = cv2.imread('1514793078.889753.png', cv2.IMREAD_COLOR)
+    # for row_idx, row in enumerate(src):
+    #     for col_idx, col in enumerate(row):
+    #         # 过滤背景
+    #         if threshold_background_min[0] <= col[0] <= threshold_background_max[0] \
+    #                 and threshold_background_min[1] <= col[1] <= threshold_background_max[1] \
+    #                 and threshold_background_min[2] <= col[2] <= threshold_background_max[2]:
+    #             src[row_idx, col_idx] = np.array([0, 0, 0])
+    # gray_arr = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
     # gray_arr[np.logical_or(gray_arr < 40, gray_arr > 100)] = 255
     # # 中值滤波去噪
     # gray_arr = cv2.medianBlur(gray_arr, 5)
@@ -213,29 +210,30 @@ if __name__ == '__main__':
     # _, contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     # # 过滤异常大小的轮廓
     # contours = list(filter(lambda c: 500 < cv2.contourArea(c) < 10000, contours))
-    # left = binary.shape[1]
-    # right = 0
     # for contour in contours:
-    #     # cv2.drawContours(src, [contour], -1, (0, 0, 255), 3)
-    #     # show(src)
-    #     min_x = contour.min(axis=1).min(axis=0)[0]
-    #     max_x = contour.max(axis=1).max(axis=0)[0]
-    #     print(max_x - min_x)
-    #     if max_x - min_x < threshold_chess_width_max:
-    #         left = min(left, min_x)
-    #         right = max(right, max_x)
-    # print(left, right)
+    #     left = contour.min(axis=1).min(axis=0)[0]
+    #     right = contour.max(axis=1).max(axis=0)[0]
+    #     if right - left < threshold_chess_width_max:
+    #         cv2.drawContours(src, [contour], -1, (0, 0, 255), 3)
+    #         show(src)
+    #         print(left, right)
+    #         src[:, left:right] = 0
+    #         break
+    # show(src)
     # 找到背景色的灰度，进行去除
-    bg_gray = np.bincount(gray_arr.reshape(-1)).argmax()
-    # bg_gray = 206
-    # 把背景色中灰度数值出现最多的一个灰度当做背景灰度，相差10范围内的灰度像素都进行去除
-    bool_index = np.logical_and(gray_arr >= bg_gray - 3, gray_arr <= bg_gray + 3)
-    gray_arr[bool_index] = 0
-    gray_arr = cv2.medianBlur(gray_arr, 5)
-    show(gray_arr)
-    index_arr = np.where(gray_arr != 0)
-    top_y = index_arr[0].min()
-    a = np.where(gray_arr[top_y] != 0)
-    print(len(a[0]))
-    top_x = a[0][math.ceil(len(a[0]) / 2)]
-    print(top_x)
+    # bg_gray = np.bincount(gray_arr.reshape(-1)).argmax()
+    # print(bg_gray)
+    # gray_arr = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+    # show(gray_arr)
+    # # bg_gray = 206
+    # # 把背景色中灰度数值出现最多的一个灰度当做背景灰度，相差10范围内的灰度像素都进行去除
+    # bool_index = np.logical_and(gray_arr >= bg_gray - 3, gray_arr <= bg_gray + 3)
+    # gray_arr[bool_index] = 0
+    # gray_arr = cv2.medianBlur(gray_arr, 5)
+    # show(gray_arr)
+    # index_arr = np.where(gray_arr != 0)
+    # top_y = index_arr[0].min()
+    # top_line = np.where(gray_arr[top_y] != 0)
+    # print(top_line)
+    # top_x = top_line[0][math.floor(len(top_line[0]) / 2)]
+    # print(top_x)
