@@ -8,19 +8,20 @@ import numpy as np
 
 ASSETS_PATH = os.path.dirname(os.path.realpath(__file__)) + '/assets/'
 
+# B, G, R
 threshold_chess_max = [130, 100, 100]
 threshold_background_max = [221, 229, 255]
-threshold_background_min = [204, 196, 200]
+threshold_background_min = [145, 196, 196]
+
+# 识别棋子底部的最大宽度
+threshold_chess_width_max = 80
 
 
 class WechatJump(ABC):
     # 屏幕截图像素与屏幕尺寸的比例，本比例为iPhone 6s
     scale = 2
-    # 系数，距离 * 系数 = 按压时间
+    # 系数，距离 * 系数 = 按压时间，本系数为iPhone 6s
     ratio = 0.0023
-
-    threshold_shadow_max = [150, 150, 180]
-    threshold_shadow_min = [140, 140, 170]
 
     def go(self):
         print('成功加载微信')
@@ -57,21 +58,22 @@ class WechatJump(ABC):
 
     def _jump(self):
         # 判断游戏是否结束
-        while self.__find(ASSETS_PATH + 'restart.png') is None:
+        while 1:
+            chess_x, box_x = self.get_chess_and_box_pos()
+            if box_x == 0:
+                break
             # 计算距离，设置
-            dis = self._cal_dis()
+            dis = abs(box_x - chess_x)
             print('距离 %s 按压时间 %s' % (dis, dis * self.ratio))
             # 长按
             self.swipe(100, 100, 100, 100, dis * self.ratio)
             time.sleep(1)
-        else:
-            print('重新开始')
-            self.__screenshot()
-            self.__click(ASSETS_PATH + 'restart.png')
-            time.sleep(1)
-            self._jump()
+        print('重新开始')
+        self.__click(ASSETS_PATH + 'restart.png')
+        time.sleep(1)
+        self._jump()
 
-    def _cal_dis(self):
+    def get_chess_and_box_pos(self):
         self.__screenshot()
         pic = cv2.imread('screenshot.png', cv2.IMREAD_COLOR)
         h, w, _ = pic.shape
@@ -84,48 +86,53 @@ class WechatJump(ABC):
                         and threshold_background_min[1] <= col[1] <= threshold_background_max[1] \
                         and threshold_background_min[2] <= col[2] <= threshold_background_max[2]:
                     pic[row_idx, col_idx] = np.array([0, 0, 0])
+        cv2.imwrite(str(time.time()) + '.png', pic)
         # 根据灰度数组找出棋子位置
-        chess_x, chess_y = self.__find_chess(pic)
-        print('棋子位置', chess_x, chess_y)
+        chess_x = self.__find_chess(pic)
+        print('棋子位置', chess_x)
         # 根据灰度数组找出下一个盒子的位置
-        box_x, box_y = self.__find_next_box(pic)
-        print('盒子位置', box_x, box_y)
-        dis = abs(box_x - chess_x)
-        return dis
+        box_x = self.__find_next_box(pic)
+        print('盒子位置', box_x)
+        return chess_x, box_x
 
-    def __find_chess(self, sub_pic):
-        gray_arr = cv2.cvtColor(sub_pic, cv2.COLOR_BGR2GRAY)
-        gray_arr[np.logical_or(gray_arr < 50, gray_arr > 100)] = 255
+    @staticmethod
+    def __find_chess(pic):
+        gray_arr = cv2.cvtColor(pic, cv2.COLOR_BGR2GRAY)
+        gray_arr[np.logical_or(gray_arr < 40, gray_arr > 100)] = 255
         # 中值滤波去噪
         gray_arr = cv2.medianBlur(gray_arr, 5)
+        # 二值化
         _, binary = cv2.threshold(gray_arr, 80, 255, cv2.THRESH_BINARY)
-        index_arr = np.where(binary == 0)
-        # 找到最左侧的点
-        left = index_arr[1].min()
-        # 找到最右侧的点
-        right = index_arr[1].max()
-        # 找到最下方的点
-        bottom = index_arr[0].max()
-        x = (left + right) / 2
-        # 圆底半径
-        r = (right - left) / 2
-        y = bottom - r
-        return x, y
+        # 寻找轮廓
+        _, contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        # 过滤异常大小的轮廓
+        contours = list(filter(lambda c: 500 < cv2.contourArea(c) < 10000, contours))
+        left = binary.shape[1]
+        right = 0
+        for contour in contours:
+            # cv2.drawContours(src, [contour], -1, (0, 0, 255), 3)
+            # show(src)
+            min_x = contour.min(axis=1).min(axis=0)[0]
+            max_x = contour.max(axis=1).max(axis=0)[0]
+            print(max_x - min_x)
+            if max_x - min_x < threshold_chess_width_max:
+                left = min(left, min_x)
+                right = max(right, max_x)
+        return (left + right) / 2
 
-    def __find_next_box(self, sub_pic):
-        gray_arr = cv2.cvtColor(sub_pic, cv2.COLOR_BGR2GRAY)
-        # 找到出现次数最多的灰度值
-        bg_gray = 206
-        # 把该值当做背景色进行去除
-        bool_index = np.logical_and(gray_arr >= bg_gray - 5, gray_arr <= bg_gray + 5)
-        gray_arr[bool_index] = 0
+    @staticmethod
+    def __find_next_box(pic):
+        gray_arr = cv2.cvtColor(pic, cv2.COLOR_BGR2GRAY)
         gray_arr = cv2.medianBlur(gray_arr, 5)
+        bg_gray = np.bincount(pic.reshape(-1)).argmax()
+        # 把背景色中灰度数值出现最多的一个灰度当做背景灰度，相差3范围内的灰度像素都进行去除
+        bool_index = np.logical_and(gray_arr >= bg_gray - 3, gray_arr <= bg_gray - 3)
+        gray_arr[bool_index] = 0
         index_arr = np.where(gray_arr != 0)
         top_y = index_arr[0].min()
-        top_x = np.where(gray_arr[top_y] != 0)[0][0]
-        right_x = index_arr[1].max()
-        right_y = np.where(gray_arr[:, right_x] != 0)[0][0]
-        return top_x, right_y
+        top_line = np.where(gray_arr[top_y] != 0)
+        top_x = top_line[0][math.floor(len(top_line[0]) / 2)]
+        return top_x
 
     def __screenshot(self):
         self.screenshot('screenshot.png')
@@ -185,3 +192,50 @@ def show(result):
     cv2.imshow('result', result)
     cv2.waitKey()
     cv2.destroyAllWindows()
+
+
+if __name__ == '__main__':
+    src = cv2.imread('1514776195.942049.png', cv2.IMREAD_COLOR)
+    for row_idx, row in enumerate(src):
+        for col_idx, col in enumerate(row):
+            # 过滤背景
+            if threshold_background_min[0] <= col[0] <= threshold_background_max[0] \
+                    and threshold_background_min[1] <= col[1] <= threshold_background_max[1] \
+                    and threshold_background_min[2] <= col[2] <= threshold_background_max[2]:
+                src[row_idx, col_idx] = np.array([0, 0, 0])
+    gray_arr = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+    # gray_arr[np.logical_or(gray_arr < 40, gray_arr > 100)] = 255
+    # # 中值滤波去噪
+    # gray_arr = cv2.medianBlur(gray_arr, 5)
+    # # 二值化
+    # _, binary = cv2.threshold(gray_arr, 80, 255, cv2.THRESH_BINARY)
+    # # 寻找轮廓
+    # _, contours, hierarchy = cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    # # 过滤异常大小的轮廓
+    # contours = list(filter(lambda c: 500 < cv2.contourArea(c) < 10000, contours))
+    # left = binary.shape[1]
+    # right = 0
+    # for contour in contours:
+    #     # cv2.drawContours(src, [contour], -1, (0, 0, 255), 3)
+    #     # show(src)
+    #     min_x = contour.min(axis=1).min(axis=0)[0]
+    #     max_x = contour.max(axis=1).max(axis=0)[0]
+    #     print(max_x - min_x)
+    #     if max_x - min_x < threshold_chess_width_max:
+    #         left = min(left, min_x)
+    #         right = max(right, max_x)
+    # print(left, right)
+    # 找到背景色的灰度，进行去除
+    bg_gray = np.bincount(gray_arr.reshape(-1)).argmax()
+    # bg_gray = 206
+    # 把背景色中灰度数值出现最多的一个灰度当做背景灰度，相差10范围内的灰度像素都进行去除
+    bool_index = np.logical_and(gray_arr >= bg_gray - 3, gray_arr <= bg_gray + 3)
+    gray_arr[bool_index] = 0
+    gray_arr = cv2.medianBlur(gray_arr, 5)
+    show(gray_arr)
+    index_arr = np.where(gray_arr != 0)
+    top_y = index_arr[0].min()
+    a = np.where(gray_arr[top_y] != 0)
+    print(len(a[0]))
+    top_x = a[0][math.ceil(len(a[0]) / 2)]
+    print(top_x)
